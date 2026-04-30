@@ -49,6 +49,7 @@ ORDER BY ?countryLabel
 `;
 
 // Approach B: from person → P39 (no endDate) → position → country via P1001
+// Uses explicit VALUES for head_of_state to avoid transitive closure timeout
 const SPARQL_B = `
 SELECT
   ?countryLabel ?personLabel ?stmtRole ?startDate
@@ -69,7 +70,7 @@ WHERE {
         ?position wdt:P279* wd:Q48352.
         BIND("head_of_government" AS ?stmtRole)
       } UNION {
-        ?position wdt:P279* wd:Q48337.
+        ?position wdt:P279* wd:Q30461.
         BIND("head_of_state" AS ?stmtRole)
       }
       ?position wdt:P1001 ?country.
@@ -196,7 +197,7 @@ const PER_PAGE = 30;
 
 async function fetchSPARQL(query) {
   const url = `${ENDPOINT}?query=${encodeURIComponent(query)}&format=json`;
-  const res = await fetch(url, { headers: { Accept: 'application/json' } });
+  const res = await fetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
@@ -227,8 +228,6 @@ function parseRows(json) {
 }
 
 // ─── Merge A + B ─────────────────────────────────────────────────────────────
-// Key: country|stmtRole — one entry per country per role type
-// Tie-break: prefer later startDate; if no startDate, prefer B (person-based)
 
 function mergeResults(rowsA, rowsB) {
   const map = new Map();
@@ -239,16 +238,14 @@ function mergeResults(rowsA, rowsB) {
       map.set(key, { ...row, source });
       return;
     }
-    const existing = map.get(key);
+    const existing    = map.get(key);
     const existingDate = dateToNum(existing.startDate);
     const newDate      = dateToNum(row.startDate);
 
-    // Prefer later startDate
     if (newDate > existingDate) {
       map.set(key, { ...row, source });
       return;
     }
-    // If same date or no date, prefer B (person-based, more up-to-date)
     if (newDate === existingDate && source === 'B') {
       map.set(key, { ...row, source });
     }
@@ -417,11 +414,11 @@ document.getElementById('genderFilter').addEventListener('change', applyFilter);
 
 (async () => {
   try {
-    setLoadMsg('Fetching from country records (A)...');
+    setLoadMsg('Fetching from country records...');
     const jsonA = await fetchSPARQL(SPARQL_A);
     const rowsA = parseRows(jsonA);
 
-    setLoadMsg('Fetching from person records (B)...');
+    setLoadMsg('Fetching from person records...');
     const jsonB = await fetchSPARQL(SPARQL_B);
     const rowsB = parseRows(jsonB);
 
