@@ -239,11 +239,8 @@ function mergeResults(rowsA, rowsB) {
     const existingDate = dateToNum(existing.startDate);
     const newDate      = dateToNum(row.startDate);
 
+    // Only replace if new result has a strictly later startDate
     if (newDate > existingDate) {
-      map.set(key, { ...row, source });
-      return;
-    }
-    if (newDate === existingDate && source === 'B') {
       map.set(key, { ...row, source });
     }
   }
