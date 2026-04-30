@@ -1,7 +1,12 @@
 // ─── SPARQL Query ───────────────────────────────────────────────────────────
 
 const SPARQL = `
-SELECT DISTINCT ?countryLabel ?personLabel ?positionLabel ?startDate ?genderLabel ?birthDate ?age ?yearsInOffice ?occupationLabel ?religionLabel WHERE {
+SELECT DISTINCT
+  ?countryLabel ?personLabel ?positionLabel ?startDate
+  ?genderLabel ?birthDate ?age ?yearsInOffice
+  (GROUP_CONCAT(DISTINCT ?occupationLabel; separator=", ") AS ?occupations)
+  (GROUP_CONCAT(DISTINCT ?religionLabel;  separator=", ") AS ?religions)
+WHERE {
   ?country wdt:P31 wd:Q6256.
   {
     ?country p:P35 ?stmt.
@@ -35,6 +40,7 @@ SELECT DISTINCT ?countryLabel ?personLabel ?positionLabel ?startDate ?genderLabe
   )
   SERVICE wikibase:label { bd:serviceParam wikibase:language "he,en". }
 }
+GROUP BY ?countryLabel ?personLabel ?positionLabel ?startDate ?genderLabel ?birthDate ?age ?yearsInOffice
 ORDER BY ?countryLabel
 LIMIT 500
 `;
@@ -119,8 +125,8 @@ function parseRows(json) {
     const country    = row.countryLabel?.value    || '';
     const person     = row.personLabel?.value     || '';
     const position   = row.positionLabel?.value   || '';
-    const occupation = row.occupationLabel?.value || '—';
-    const religion   = row.religionLabel?.value   || '—';
+    const occupation = row.occupations?.value || '—';
+    const religion   = row.religions?.value  || '—';
     const gender     = row.genderLabel?.value     || '—';
     const birthDate  = row.birthDate?.value       || '';
     const startDate  = row.startDate?.value       || '';
