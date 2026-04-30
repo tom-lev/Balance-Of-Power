@@ -223,11 +223,25 @@ const PER_PAGE = 30;
 
 // ─── Fetch ───────────────────────────────────────────────────────────────────
 
-async function fetchSPARQL(query) {
+async function fetchSPARQL(query, retries = 3) {
   const url = `${ENDPOINT}?query=${encodeURIComponent(query)}&format=json&origin=*`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, 2 ** attempt * 1000));
+    try {
+      const res = await fetch(url);
+      if (res.ok) return res.json();
+      if ([429, 502, 503].includes(res.status) && attempt < retries) {
+        lastErr = new Error(`HTTP ${res.status}`);
+        continue;
+      }
+      throw new Error(`HTTP ${res.status}`);
+    } catch (e) {
+      if (attempt < retries && !(e.message.startsWith('HTTP'))) { lastErr = e; continue; }
+      throw e;
+    }
+  }
+  throw lastErr;
 }
 
 // ─── Parse ───────────────────────────────────────────────────────────────────
