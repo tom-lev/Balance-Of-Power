@@ -1,15 +1,13 @@
 // ─── SPARQL Queries ──────────────────────────────────────────────────────────
 
-// Approach A: from country → P35/P6 → person
 const SPARQL_A = `
 SELECT
-  ?countryLabel ?personLabel ?stmtRole ?startDate
-  ?genderLabel ?birthDate ?isMonarch
-  ?occupations ?religions
+  ?countryLabel ?personLabel ?stmtRole ?positionLabel ?startDate
+  ?genderLabel ?birthDate ?occupations ?religions
 WHERE {
   {
     SELECT
-      ?country ?person ?stmtRole ?startDate ?gender ?birthDate ?isMonarch
+      ?country ?person ?stmtRole ?position ?startDate ?gender ?birthDate
       (GROUP_CONCAT(DISTINCT ?occupation; separator=", ") AS ?occupationList)
       (GROUP_CONCAT(DISTINCT ?religion;  separator=", ") AS ?religionList)
     WHERE {
@@ -17,21 +15,18 @@ WHERE {
       {
         ?country p:P35 ?stmt.
         ?stmt ps:P35 ?person.
+        ?country wdt:P35 ?position.
         BIND("head_of_state" AS ?stmtRole)
       } UNION {
         ?country p:P6 ?stmt.
         ?stmt ps:P6 ?person.
+        ?country wdt:P6 ?position.
         BIND("head_of_government" AS ?stmtRole)
       }
       FILTER NOT EXISTS { ?stmt pq:P582 ?endDate }
       OPTIONAL { ?stmt pq:P580 ?startDate }
       OPTIONAL { ?person wdt:P21 ?gender. }
       OPTIONAL { ?person wdt:P569 ?birthDate. }
-      OPTIONAL {
-        ?person wdt:P39 ?posEnt.
-        ?posEnt wdt:P279* wd:Q116.
-        BIND("true" AS ?isMonarch)
-      }
       OPTIONAL { ?person wdt:P106 ?occupationEntity.
                  OPTIONAL { ?occupationEntity rdfs:label ?occupation.
                             FILTER(LANG(?occupation) = "en") } }
@@ -39,7 +34,7 @@ WHERE {
                  OPTIONAL { ?religionEntity rdfs:label ?religion.
                             FILTER(LANG(?religion) = "en") } }
     }
-    GROUP BY ?country ?person ?stmtRole ?startDate ?gender ?birthDate ?isMonarch
+    GROUP BY ?country ?person ?stmtRole ?position ?startDate ?gender ?birthDate
   }
   BIND(IF(?occupationList != "", ?occupationList, "") AS ?occupations)
   BIND(IF(?religionList   != "", ?religionList,   "") AS ?religions)
@@ -48,17 +43,14 @@ WHERE {
 ORDER BY ?countryLabel
 `;
 
-// Approach B: from person → P39 (no endDate) → position → country via P1001
-// Uses explicit VALUES for head_of_state to avoid transitive closure timeout
 const SPARQL_B = `
 SELECT
-  ?countryLabel ?personLabel ?stmtRole ?startDate
-  ?genderLabel ?birthDate ?isMonarch
-  ?occupations ?religions
+  ?countryLabel ?personLabel ?stmtRole ?positionLabel ?startDate
+  ?genderLabel ?birthDate ?occupations ?religions
 WHERE {
   {
     SELECT
-      ?country ?person ?stmtRole ?startDate ?gender ?birthDate ?isMonarch
+      ?country ?person ?stmtRole ?position ?startDate ?gender ?birthDate
       (GROUP_CONCAT(DISTINCT ?occupation; separator=", ") AS ?occupationList)
       (GROUP_CONCAT(DISTINCT ?religion;  separator=", ") AS ?religionList)
     WHERE {
@@ -71,17 +63,9 @@ WHERE {
         BIND("head_of_government" AS ?stmtRole)
       } UNION {
         VALUES ?position {
-          wd:Q30461    # president
-          wd:Q1055603  # president of a republic
-          wd:Q18810062 # head of state
-          wd:Q116      # monarch
-          wd:Q1097498  # king
-          wd:Q12097    # queen regnant
-          wd:Q48772    # sultan
-          wd:Q169874   # emir
-          wd:Q321839   # grand duke
-          wd:Q12097    # empress
-          wd:Q28375952 # queen
+          wd:Q30461    wd:Q1055603  wd:Q18810062
+          wd:Q116      wd:Q1097498  wd:Q12097
+          wd:Q48772    wd:Q169874   wd:Q321839   wd:Q28375952
         }
         BIND("head_of_state" AS ?stmtRole)
       }
@@ -89,11 +73,6 @@ WHERE {
       ?country wdt:P31 wd:Q6256.
       OPTIONAL { ?person wdt:P21 ?gender. }
       OPTIONAL { ?person wdt:P569 ?birthDate. }
-      OPTIONAL {
-        ?person wdt:P39 ?posEnt.
-        ?posEnt wdt:P279* wd:Q116.
-        BIND("true" AS ?isMonarch)
-      }
       OPTIONAL { ?person wdt:P106 ?occupationEntity.
                  OPTIONAL { ?occupationEntity rdfs:label ?occupation.
                             FILTER(LANG(?occupation) = "en") } }
@@ -101,7 +80,7 @@ WHERE {
                  OPTIONAL { ?religionEntity rdfs:label ?religion.
                             FILTER(LANG(?religion) = "en") } }
     }
-    GROUP BY ?country ?person ?stmtRole ?startDate ?gender ?birthDate ?isMonarch
+    GROUP BY ?country ?person ?stmtRole ?position ?startDate ?gender ?birthDate
   }
   BIND(IF(?occupationList != "", ?occupationList, "") AS ?occupations)
   BIND(IF(?religionList   != "", ?religionList,   "") AS ?religions)
@@ -114,10 +93,16 @@ const ENDPOINT = 'https://query.wikidata.org/sparql';
 
 // ─── Role Classification ─────────────────────────────────────────────────────
 
-function classifyRole(stmtRole, isMonarch) {
+const MONARCH_KEYWORDS = [
+  'king','queen','emperor','empress','sultan','emir','monarch',
+  'prince','grand duke','tsar','pharaoh','sheikh','caliph','raja'
+];
+
+function classifyRole(stmtRole, positionLabel) {
   if (stmtRole === 'head_of_government') return 'Prime Minister';
   if (stmtRole === 'head_of_state') {
-    if (isMonarch === 'true') return 'Monarch';
+    const l = (positionLabel || '').toLowerCase();
+    if (MONARCH_KEYWORDS.some(k => l.includes(k))) return 'Monarch';
     return 'President';
   }
   return 'Other';
@@ -208,7 +193,7 @@ const PER_PAGE = 30;
 // ─── Fetch ───────────────────────────────────────────────────────────────────
 
 async function fetchSPARQL(query) {
-  const url = `${ENDPOINT}?query=${encodeURIComponent(query)}&format=json`;
+  const url = `${ENDPOINT}?query=${encodeURIComponent(query)}&format=json&origin=*`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
@@ -219,22 +204,22 @@ async function fetchSPARQL(query) {
 function parseRows(json) {
   const rows = [];
   for (const row of json.results.bindings) {
-    const country    = row.countryLabel?.value || '';
-    const person     = row.personLabel?.value  || '';
-    const stmtRole   = row.stmtRole?.value     || '';
-    const isMonarch  = row.isMonarch?.value    || '';
-    const gender     = row.genderLabel?.value  || '—';
-    const birthDate  = row.birthDate?.value    || '';
-    const startDate  = row.startDate?.value    || '';
-    const occupation = sanitizeOccupation(row.occupations?.value || '');
-    const religion   = row.religions?.value    || '—';
-    const role       = classifyRole(stmtRole, isMonarch);
-    const age        = calcAge(birthDate);
-    const yio        = calcYIO(startDate);
+    const country       = row.countryLabel?.value   || '';
+    const person        = row.personLabel?.value    || '';
+    const stmtRole      = row.stmtRole?.value       || '';
+    const positionLabel = row.positionLabel?.value  || '';
+    const gender        = row.genderLabel?.value    || '—';
+    const birthDate     = row.birthDate?.value      || '';
+    const startDate     = row.startDate?.value      || '';
+    const occupation    = sanitizeOccupation(row.occupations?.value || '');
+    const religion      = row.religions?.value      || '—';
+    const role          = classifyRole(stmtRole, positionLabel);
+    const age           = calcAge(birthDate);
+    const yio           = calcYIO(startDate);
 
     if (!country || !person) continue;
 
-    rows.push({ country, person, stmtRole, role, gender, age, yio, startDate, birthDate, occupation, religion });
+    rows.push({ country, person, stmtRole, positionLabel, role, gender, age, yio, startDate, birthDate, occupation, religion });
   }
   return rows;
 }
@@ -250,7 +235,7 @@ function mergeResults(rowsA, rowsB) {
       map.set(key, { ...row, source });
       return;
     }
-    const existing    = map.get(key);
+    const existing     = map.get(key);
     const existingDate = dateToNum(existing.startDate);
     const newDate      = dateToNum(row.startDate);
 
