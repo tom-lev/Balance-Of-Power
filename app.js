@@ -1,10 +1,11 @@
-// ─── SPARQL Query ───────────────────────────────────────────────────────────
+// ─── SPARQL Queries ──────────────────────────────────────────────────────────
 
-const SPARQL = `
+// Approach A: from country → P35/P6 → person
+const SPARQL_A = `
 SELECT
   ?countryLabel ?personLabel ?stmtRole ?startDate
-  ?genderLabel ?birthDate ?age ?yearsInOffice
-  ?occupations ?religions ?isMonarch
+  ?genderLabel ?birthDate ?isMonarch
+  ?occupations ?religions
 WHERE {
   {
     SELECT
@@ -40,22 +41,57 @@ WHERE {
     }
     GROUP BY ?country ?person ?stmtRole ?startDate ?gender ?birthDate ?isMonarch
   }
-
-  BIND(
-    YEAR(NOW()) - YEAR(?birthDate) -
-    IF(MONTH(NOW()) < MONTH(?birthDate) ||
-      (MONTH(NOW()) = MONTH(?birthDate) && DAY(NOW()) < DAY(?birthDate)), 1, 0)
-    AS ?age
-  )
-  BIND(
-    YEAR(NOW()) - YEAR(?startDate) -
-    IF(MONTH(NOW()) < MONTH(?startDate) ||
-      (MONTH(NOW()) = MONTH(?startDate) && DAY(NOW()) < DAY(?startDate)), 1, 0)
-    AS ?yearsInOffice
-  )
   BIND(IF(?occupationList != "", ?occupationList, "") AS ?occupations)
   BIND(IF(?religionList   != "", ?religionList,   "") AS ?religions)
+  SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+}
+ORDER BY ?countryLabel
+`;
 
+// Approach B: from person → P39 (no endDate) → position → country via P1001
+const SPARQL_B = `
+SELECT
+  ?countryLabel ?personLabel ?stmtRole ?startDate
+  ?genderLabel ?birthDate ?isMonarch
+  ?occupations ?religions
+WHERE {
+  {
+    SELECT
+      ?country ?person ?stmtRole ?startDate ?gender ?birthDate ?isMonarch
+      (GROUP_CONCAT(DISTINCT ?occupation; separator=", ") AS ?occupationList)
+      (GROUP_CONCAT(DISTINCT ?religion;  separator=", ") AS ?religionList)
+    WHERE {
+      ?person p:P39 ?posStmt.
+      ?posStmt ps:P39 ?position.
+      FILTER NOT EXISTS { ?posStmt pq:P582 ?endDate }
+      OPTIONAL { ?posStmt pq:P580 ?startDate }
+      {
+        ?position wdt:P279* wd:Q48352.
+        BIND("head_of_government" AS ?stmtRole)
+      } UNION {
+        ?position wdt:P279* wd:Q48337.
+        BIND("head_of_state" AS ?stmtRole)
+      }
+      ?position wdt:P1001 ?country.
+      ?country wdt:P31 wd:Q6256.
+      OPTIONAL { ?person wdt:P21 ?gender. }
+      OPTIONAL { ?person wdt:P569 ?birthDate. }
+      OPTIONAL {
+        ?person wdt:P39 ?posEnt.
+        ?posEnt wdt:P279* wd:Q116.
+        BIND("true" AS ?isMonarch)
+      }
+      OPTIONAL { ?person wdt:P106 ?occupationEntity.
+                 OPTIONAL { ?occupationEntity rdfs:label ?occupation.
+                            FILTER(LANG(?occupation) = "en") } }
+      OPTIONAL { ?person wdt:P140 ?religionEntity.
+                 OPTIONAL { ?religionEntity rdfs:label ?religion.
+                            FILTER(LANG(?religion) = "en") } }
+    }
+    GROUP BY ?country ?person ?stmtRole ?startDate ?gender ?birthDate ?isMonarch
+  }
+  BIND(IF(?occupationList != "", ?occupationList, "") AS ?occupations)
+  BIND(IF(?religionList   != "", ?religionList,   "") AS ?religions)
   SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
 }
 ORDER BY ?countryLabel
@@ -64,7 +100,6 @@ ORDER BY ?countryLabel
 const ENDPOINT = 'https://query.wikidata.org/sparql';
 
 // ─── Role Classification ─────────────────────────────────────────────────────
-// Based on stmt property (P35/P6) + monarch check — NOT on label strings
 
 function classifyRole(stmtRole, isMonarch) {
   if (stmtRole === 'head_of_government') return 'Prime Minister';
@@ -81,26 +116,43 @@ function formatDate(d) {
   if (!d) return '—';
   const m = d.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (!m) return '—';
-  // If Jan 1 — likely year-precision only, show year only
   if (m[2] === '01' && m[3] === '01') return m[1];
   return `${m[3]}.${m[2]}.${m[1]}`;
 }
 
-function sanitizeAge(age) {
-  if (age == null || isNaN(age)) return null;
+function dateToNum(d) {
+  if (!d) return 0;
+  const m = d.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return 0;
+  return parseInt(m[1]) * 10000 + parseInt(m[2]) * 100 + parseInt(m[3]);
+}
+
+function calcAge(birthDate) {
+  if (!birthDate) return null;
+  const m = birthDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return null;
+  const now = new Date();
+  let age = now.getFullYear() - parseInt(m[1]);
+  const monthDiff = now.getMonth() + 1 - parseInt(m[2]);
+  if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < parseInt(m[3]))) age--;
   if (age < 20 || age > 120) return null;
   return age;
 }
 
-function sanitizeYIO(yio) {
-  if (yio == null || isNaN(yio)) return null;
+function calcYIO(startDate) {
+  if (!startDate) return null;
+  const m = startDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return null;
+  const now = new Date();
+  let yio = now.getFullYear() - parseInt(m[1]);
+  const monthDiff = now.getMonth() + 1 - parseInt(m[2]);
+  if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < parseInt(m[3]))) yio--;
   if (yio < 0 || yio > 80) return null;
   return yio;
 }
 
 function sanitizeOccupation(occ) {
   if (!occ) return '—';
-  // Remove trivial-only entries
   const parts = occ.split(', ').filter(p => p.trim().toLowerCase() !== 'politician');
   return parts.length > 0 ? parts.join(', ') : 'politician';
 }
@@ -140,53 +192,72 @@ let sortAsc  = true;
 let page     = 0;
 const PER_PAGE = 30;
 
-// ─── Fetch & Parse ───────────────────────────────────────────────────────────
+// ─── Fetch ───────────────────────────────────────────────────────────────────
 
-async function fetchData() {
-  const url = `${ENDPOINT}?query=${encodeURIComponent(SPARQL)}&format=json`;
+async function fetchSPARQL(query) {
+  const url = `${ENDPOINT}?query=${encodeURIComponent(query)}&format=json`;
   const res = await fetch(url, { headers: { Accept: 'application/json' } });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
 
+// ─── Parse ───────────────────────────────────────────────────────────────────
+
 function parseRows(json) {
-  // Dedup key: country|person|stmtRole — allows same person in two roles (e.g. US president)
-  // but blocks duplicate rows for same role
-  const seen = new Set();
   const rows = [];
-
   for (const row of json.results.bindings) {
-    const country   = row.countryLabel?.value || '';
-    const person    = row.personLabel?.value  || '';
-    const stmtRole  = row.stmtRole?.value     || '';
-    const isMonarch = row.isMonarch?.value    || '';
-    const gender    = row.genderLabel?.value  || '—';
-    const birthDate = row.birthDate?.value    || '';
-    const startDate = row.startDate?.value    || '';
+    const country    = row.countryLabel?.value || '';
+    const person     = row.personLabel?.value  || '';
+    const stmtRole   = row.stmtRole?.value     || '';
+    const isMonarch  = row.isMonarch?.value    || '';
+    const gender     = row.genderLabel?.value  || '—';
+    const birthDate  = row.birthDate?.value    || '';
+    const startDate  = row.startDate?.value    || '';
+    const occupation = sanitizeOccupation(row.occupations?.value || '');
+    const religion   = row.religions?.value    || '—';
+    const role       = classifyRole(stmtRole, isMonarch);
+    const age        = calcAge(birthDate);
+    const yio        = calcYIO(startDate);
 
-    const rawAge = row.age?.value          ? parseInt(row.age.value)           : null;
-    const rawYio = row.yearsInOffice?.value ? parseInt(row.yearsInOffice.value) : null;
-    const age    = sanitizeAge(rawAge);
-    const yio    = sanitizeYIO(rawYio);
-
-    const rawOcc    = row.occupations?.value || '';
-    const rawRel    = row.religions?.value   || '';
-    const occupation = sanitizeOccupation(rawOcc);
-    const religion   = rawRel || '—';
-
-    const role = classifyRole(stmtRole, isMonarch);
-
-    // Skip clearly bad rows
     if (!country || !person) continue;
-
-    const key = `${country}|${person}|${stmtRole}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
 
     rows.push({ country, person, stmtRole, role, gender, age, yio, startDate, birthDate, occupation, religion });
   }
-
   return rows;
+}
+
+// ─── Merge A + B ─────────────────────────────────────────────────────────────
+// Key: country|stmtRole — one entry per country per role type
+// Tie-break: prefer later startDate; if no startDate, prefer B (person-based)
+
+function mergeResults(rowsA, rowsB) {
+  const map = new Map();
+
+  function upsert(row, source) {
+    const key = `${row.country}|${row.stmtRole}`;
+    if (!map.has(key)) {
+      map.set(key, { ...row, source });
+      return;
+    }
+    const existing = map.get(key);
+    const existingDate = dateToNum(existing.startDate);
+    const newDate      = dateToNum(row.startDate);
+
+    // Prefer later startDate
+    if (newDate > existingDate) {
+      map.set(key, { ...row, source });
+      return;
+    }
+    // If same date or no date, prefer B (person-based, more up-to-date)
+    if (newDate === existingDate && source === 'B') {
+      map.set(key, { ...row, source });
+    }
+  }
+
+  for (const row of rowsA) upsert(row, 'A');
+  for (const row of rowsB) upsert(row, 'B');
+
+  return Array.from(map.values());
 }
 
 // ─── Filter & Sort ───────────────────────────────────────────────────────────
@@ -313,6 +384,11 @@ function renderPagination() {
   });
 }
 
+function setLoadMsg(msg) {
+  const el = document.getElementById('loadMsg');
+  if (el) { el.style.display = 'block'; el.textContent = msg; }
+}
+
 // ─── Sort Clicks ─────────────────────────────────────────────────────────────
 
 document.querySelectorAll('thead th[data-col]').forEach(th => {
@@ -341,8 +417,17 @@ document.getElementById('genderFilter').addEventListener('change', applyFilter);
 
 (async () => {
   try {
-    const json = await fetchData();
-    allData = parseRows(json);
+    setLoadMsg('Fetching from country records (A)...');
+    const jsonA = await fetchSPARQL(SPARQL_A);
+    const rowsA = parseRows(jsonA);
+
+    setLoadMsg('Fetching from person records (B)...');
+    const jsonB = await fetchSPARQL(SPARQL_B);
+    const rowsB = parseRows(jsonB);
+
+    setLoadMsg('Merging results...');
+    allData = mergeResults(rowsA, rowsB);
+
     document.getElementById('loadMsg').style.display = 'none';
     applyFilter();
   } catch (err) {
