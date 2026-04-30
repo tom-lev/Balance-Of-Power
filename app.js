@@ -70,7 +70,19 @@ WHERE {
         ?position wdt:P279* wd:Q48352.
         BIND("head_of_government" AS ?stmtRole)
       } UNION {
-        ?position wdt:P279* wd:Q30461.
+        VALUES ?position {
+          wd:Q30461    # president
+          wd:Q1055603  # president of a republic
+          wd:Q18810062 # head of state
+          wd:Q116      # monarch
+          wd:Q1097498  # king
+          wd:Q12097    # queen regnant
+          wd:Q48772    # sultan
+          wd:Q169874   # emir
+          wd:Q321839   # grand duke
+          wd:Q12097    # empress
+          wd:Q28375952 # queen
+        }
         BIND("head_of_state" AS ?stmtRole)
       }
       ?position wdt:P1001 ?country.
