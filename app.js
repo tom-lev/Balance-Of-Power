@@ -1,49 +1,57 @@
 // ─── SPARQL Query ───────────────────────────────────────────────────────────
 
-const SPARQL = `
-SELECT DISTINCT
+SELECT
   ?countryLabel ?personLabel ?positionLabel ?startDate
   ?genderLabel ?birthDate ?age ?yearsInOffice
-  (GROUP_CONCAT(DISTINCT ?occupationLabel; separator=", ") AS ?occupations)
-  (GROUP_CONCAT(DISTINCT ?religionLabel;  separator=", ") AS ?religions)
+  ?occupations ?religions
 WHERE {
-  ?country wdt:P31 wd:Q6256.
   {
-    ?country p:P35 ?stmt.
-    ?stmt ps:P35 ?person.
-  } UNION {
-    ?country p:P6 ?stmt.
-    ?stmt ps:P6 ?person.
+    SELECT
+      ?country ?person ?position ?startDate ?gender ?birthDate
+      (GROUP_CONCAT(DISTINCT ?occupation; separator=", ") AS ?occupationList)
+      (GROUP_CONCAT(DISTINCT ?religion;  separator=", ") AS ?religionList)
+    WHERE {
+      ?country wdt:P31 wd:Q6256.
+      {
+        ?country p:P35 ?stmt.
+        ?stmt ps:P35 ?person.
+      } UNION {
+        ?country p:P6 ?stmt.
+        ?stmt ps:P6 ?person.
+      }
+      FILTER NOT EXISTS { ?stmt pq:P582 ?endDate }
+      ?person wdt:P39 ?position.
+      OPTIONAL { ?stmt pq:P580 ?startDate }
+      OPTIONAL { ?person wdt:P21 ?gender. }
+      OPTIONAL { ?person wdt:P569 ?birthDate. }
+      OPTIONAL { ?person wdt:P106 ?occupationEntity.
+                 ?occupationEntity rdfs:label ?occupation.
+                 FILTER(LANG(?occupation) = "he" || LANG(?occupation) = "en") }
+      OPTIONAL { ?person wdt:P140 ?religionEntity.
+                 ?religionEntity rdfs:label ?religion.
+                 FILTER(LANG(?religion) = "he" || LANG(?religion) = "en") }
+    }
+    GROUP BY ?country ?person ?position ?startDate ?gender ?birthDate
   }
-  FILTER NOT EXISTS { ?stmt pq:P582 ?endDate }
-  ?person wdt:P39 ?position.
-  OPTIONAL { ?stmt pq:P580 ?startDate }
-  OPTIONAL { ?person wdt:P21 ?gender. }
-  OPTIONAL { ?person wdt:P569 ?birthDate. }
-  OPTIONAL { ?person wdt:P106 ?occupation. }
-  OPTIONAL { ?person wdt:P140 ?religion. }
+
   BIND(
     YEAR(NOW()) - YEAR(?birthDate) -
-    IF(
-      MONTH(NOW()) < MONTH(?birthDate) ||
-      (MONTH(NOW()) = MONTH(?birthDate) && DAY(NOW()) < DAY(?birthDate)),
-      1, 0
-    ) AS ?age
+    IF(MONTH(NOW()) < MONTH(?birthDate) ||
+      (MONTH(NOW()) = MONTH(?birthDate) && DAY(NOW()) < DAY(?birthDate)), 1, 0)
+    AS ?age
   )
   BIND(
     YEAR(NOW()) - YEAR(?startDate) -
-    IF(
-      MONTH(NOW()) < MONTH(?startDate) ||
-      (MONTH(NOW()) = MONTH(?startDate) && DAY(NOW()) < DAY(?startDate)),
-      1, 0
-    ) AS ?yearsInOffice
+    IF(MONTH(NOW()) < MONTH(?startDate) ||
+      (MONTH(NOW()) = MONTH(?startDate) && DAY(NOW()) < DAY(?startDate)), 1, 0)
+    AS ?yearsInOffice
   )
+  BIND(IF(?occupationList != "", ?occupationList, "—") AS ?occupations)
+  BIND(IF(?religionList   != "", ?religionList,   "—") AS ?religions)
+
   SERVICE wikibase:label { bd:serviceParam wikibase:language "he,en". }
 }
-GROUP BY ?countryLabel ?personLabel ?positionLabel ?startDate ?genderLabel ?birthDate ?age ?yearsInOffice
 ORDER BY ?countryLabel
-LIMIT 500
-`;
 
 const ENDPOINT = 'https://query.wikidata.org/sparql';
 
