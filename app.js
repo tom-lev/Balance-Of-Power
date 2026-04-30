@@ -47,8 +47,8 @@ WHERE {
       (MONTH(NOW()) = MONTH(?startDate) && DAY(NOW()) < DAY(?startDate)), 1, 0)
     AS ?yearsInOffice
   )
-  BIND(IF(?occupationList != "", ?occupationList, "—") AS ?occupations)
-  BIND(IF(?religionList   != "", ?religionList,   "—") AS ?religions)
+BIND(IF(?occupationList != "", ?occupationList, "\u2014") AS ?occupations)
+BIND(IF(?religionList   != "", ?religionList,   "\u2014") AS ?religions)
 
   SERVICE wikibase:label { bd:serviceParam wikibase:language "he,en". }
 }
