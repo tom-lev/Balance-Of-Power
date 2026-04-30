@@ -1,1 +1,68 @@
 
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ראשי מדינות העולם</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <header>
+    <div class="header-inner">
+      <h1>ראשי מדינות העולם</h1>
+      <p class="subtitle">נתונים בזמן אמת מ-Wikidata</p>
+    </div>
+  </header>
+
+  <main>
+    <div class="controls">
+      <input type="text" id="search" placeholder="חיפוש מדינה או שם..." />
+      <select id="roleFilter">
+        <option value="">כל התפקידים</option>
+        <option value="ראש ממשלה">ראש ממשלה</option>
+        <option value="נשיא">נשיא</option>
+        <option value="מונרך">מונרך</option>
+        <option value="אחר">אחר</option>
+      </select>
+      <select id="genderFilter">
+        <option value="">כל המגדרים</option>
+        <option value="זכר">זכר</option>
+        <option value="נקבה">נקבה</option>
+      </select>
+    </div>
+
+    <div id="stats" class="stats"></div>
+
+    <div id="loadMsg" class="load-msg">טוען נתונים מ-Wikidata...</div>
+    <div id="errorMsg" class="error-msg" style="display:none;"></div>
+
+    <div class="table-wrap">
+      <table id="mainTable" style="display:none;">
+        <thead>
+          <tr>
+            <th data-col="country">מדינה</th>
+            <th data-col="person">שם</th>
+            <th data-col="role">תפקיד</th>
+            <th data-col="gender">מגדר</th>
+            <th data-col="age">גיל</th>
+            <th data-col="yearsInOffice">שנות כהונה</th>
+            <th data-col="startDate">מתאריך</th>
+            <th data-col="occupation">עיסוק</th>
+            <th data-col="religion">דת</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+
+    <div id="pagination" class="pagination"></div>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
