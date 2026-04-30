@@ -27,10 +27,10 @@ WHERE {
       OPTIONAL { ?person wdt:P569 ?birthDate. }
       OPTIONAL { ?person wdt:P106 ?occupationEntity.
                  ?occupationEntity rdfs:label ?occupation.
-                 FILTER(LANG(?occupation) = "he" || LANG(?occupation) = "en") }
+                 FILTER(LANG(?occupation) = "en") }
       OPTIONAL { ?person wdt:P140 ?religionEntity.
                  ?religionEntity rdfs:label ?religion.
-                 FILTER(LANG(?religion) = "he" || LANG(?religion) = "en") }
+                 FILTER(LANG(?religion) = "en") }
     }
     GROUP BY ?country ?person ?position ?startDate ?gender ?birthDate
   }
@@ -47,12 +47,13 @@ WHERE {
       (MONTH(NOW()) = MONTH(?startDate) && DAY(NOW()) < DAY(?startDate)), 1, 0)
     AS ?yearsInOffice
   )
-BIND(IF(?occupationList != "", ?occupationList, "\u2014") AS ?occupations)
-BIND(IF(?religionList   != "", ?religionList,   "\u2014") AS ?religions)
+  BIND(IF(?occupationList != "", ?occupationList, "—") AS ?occupations)
+  BIND(IF(?religionList   != "", ?religionList,   "—") AS ?religions)
 
-  SERVICE wikibase:label { bd:serviceParam wikibase:language "he,en". }
+  SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
 }
 ORDER BY ?countryLabel
+LIMIT 500
 `;
 
 const ENDPOINT = 'https://query.wikidata.org/sparql';
@@ -60,18 +61,16 @@ const ENDPOINT = 'https://query.wikidata.org/sparql';
 // ─── Role Classification ─────────────────────────────────────────────────────
 
 function classifyRole(lbl) {
-  if (!lbl) return 'אחר';
+  if (!lbl) return 'Other';
   const l = lbl.toLowerCase();
-  if (l.includes('ראש ממשלה') || l.includes('prime minister') || l.includes('chancellor') || l.includes('premier')) return 'ראש ממשלה';
-  if (l.includes('נשיא') || l.includes('president')) return 'נשיא';
+  if (l.includes('prime minister') || l.includes('chancellor') || l.includes('premier') || l.includes('head of government')) return 'Prime Minister';
+  if (l.includes('president')) return 'President';
   if (
-    l.includes('מלך') || l.includes('מלכה') || l.includes('אמיר') ||
-    l.includes('סולטן') || l.includes('מונרך') || l.includes('נסיך') ||
     l.includes('king') || l.includes('queen') || l.includes('emir') ||
     l.includes('sultan') || l.includes('monarch') || l.includes('prince') ||
-    l.includes('emperor') || l.includes('sheikh')
-  ) return 'מונרך';
-  return 'אחר';
+    l.includes('emperor') || l.includes('sheikh') || l.includes('grand duke')
+  ) return 'Monarch';
+  return 'Other';
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -85,20 +84,20 @@ function formatDate(d) {
 
 function roleBadge(role) {
   const map = {
-    'ראש ממשלה': 'badge badge-pm',
-    'נשיא':      'badge badge-pres',
-    'מונרך':     'badge badge-mon',
-    'אחר':       'badge badge-other',
+    'Prime Minister': 'badge badge-pm',
+    'President':      'badge badge-pres',
+    'Monarch':        'badge badge-mon',
+    'Other':          'badge badge-other',
   };
   return `<span class="${map[role] || 'badge badge-other'}">${role}</span>`;
 }
 
 function genderCell(g) {
   if (!g || g === '—') return '<span class="gender-dot"><span class="dot dot-o"></span>—</span>';
-  const isF = g.includes('נקב') || g.toLowerCase().includes('female');
-  const isM = g.includes('זכר') || g.toLowerCase().includes('male');
+  const isF = g.toLowerCase().includes('female');
+  const isM = g.toLowerCase().includes('male');
   const cls = isF ? 'dot-f' : isM ? 'dot-m' : 'dot-o';
-  const label = isF ? 'נקבה' : isM ? 'זכר' : g;
+  const label = isF ? 'Female' : isM ? 'Male' : g;
   return `<span class="gender-dot"><span class="dot ${cls}"></span>${label}</span>`;
 }
 
@@ -164,8 +163,9 @@ function applyFilter() {
 
   filtered = allData.filter(d => {
     if (role && d.role !== role) return false;
-    if (gend === 'זכר'  && !(d.gender.includes('זכר')  || d.gender.toLowerCase().includes('male')))   return false;
-    if (gend === 'נקבה' && !(d.gender.includes('נקב') || d.gender.toLowerCase().includes('female'))) return false;
+    const g = d.gender.toLowerCase();
+    if (gend === 'male'   && !g.includes('male'))   return false;
+    if (gend === 'female' && !g.includes('female')) return false;
     if (q && !d.country.toLowerCase().includes(q) && !d.person.toLowerCase().includes(q)) return false;
     return true;
   });
@@ -206,10 +206,10 @@ function renderStats() {
   for (const d of filtered) counts[d.role] = (counts[d.role] || 0) + 1;
 
   const items = [
-    { label: 'סה"כ', value: counts.total, cls: 'accent' },
-    { label: 'ראשי ממשלה', value: counts['ראש ממשלה'] || 0 },
-    { label: 'נשיאים',     value: counts['נשיא']       || 0 },
-    { label: 'מונרכים',    value: counts['מונרך']      || 0 },
+    { label: 'Total',            value: counts.total,                    cls: 'accent' },
+    { label: 'Prime Ministers',  value: counts['Prime Minister'] || 0 },
+    { label: 'Presidents',       value: counts['President']      || 0 },
+    { label: 'Monarchs',         value: counts['Monarch']        || 0 },
   ];
 
   el.innerHTML = items.map(i =>
@@ -227,7 +227,7 @@ function renderTable() {
   const slice = filtered.slice(start, start + PER_PAGE);
 
   if (filtered.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding:2rem; color:var(--text-muted);">אין תוצאות</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding:2rem; color:var(--text-muted);">No results found</td></tr>`;
     table.style.display = 'table';
     return;
   }
@@ -315,6 +315,6 @@ document.getElementById('genderFilter').addEventListener('change', applyFilter);
     document.getElementById('loadMsg').style.display = 'none';
     const errEl = document.getElementById('errorMsg');
     errEl.style.display = 'block';
-    errEl.textContent = `שגיאה בטעינה: ${err.message}`;
+    errEl.textContent = `Error loading data: ${err.message}`;
   }
 })();
