@@ -28,11 +28,11 @@
 html { font-size: 15px; }
 
 body {
-  font-family: 'Heebo', sans-serif;
+  font-family: 'DM Sans', sans-serif;
   background: var(--bg);
   color: var(--text);
   min-height: 100vh;
-  direction: rtl;
+  direction: ltr;
 }
 
 /* Header */
@@ -49,6 +49,35 @@ header h1 {
   font-weight: 700;
   letter-spacing: -0.02em;
   color: #fff;
+}
+
+header h1 .of {
+  font-weight: 300;
+  color: var(--text-muted);
+}
+
+.header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.gh-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 12px;
+  transition: all 0.15s;
+}
+
+.gh-link:hover {
+  color: var(--text);
+  border-color: var(--border-hover);
 }
 
 .subtitle {
@@ -79,11 +108,11 @@ main {
   color: var(--text);
   border-radius: var(--radius);
   padding: 8px 12px;
-  font-family: 'Heebo', sans-serif;
+  font-family: 'DM Sans', sans-serif;
   font-size: 0.875rem;
   outline: none;
   transition: border-color 0.15s;
-  direction: rtl;
+  direction: ltr;
 }
 
 .controls input {
@@ -173,7 +202,7 @@ thead tr {
 
 thead th {
   padding: 10px 12px;
-  text-align: right;
+  text-align: left;
   font-weight: 500;
   color: var(--text-muted);
   font-size: 0.78rem;
@@ -202,6 +231,7 @@ tbody td {
   padding: 10px 12px;
   color: var(--text);
   vertical-align: middle;
+  text-align: left;
 }
 
 td.country { font-weight: 500; color: #fff; }
