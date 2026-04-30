@@ -20,20 +20,19 @@ WHERE {
         ?country p:P6 ?stmt.
         ?stmt ps:P6 ?person.
       }
-      FILTER NOT EXISTS { ?stmt pq:P582 ?endDate }
-      ?person wdt:P39 ?position.
-      OPTIONAL { ?stmt pq:P580 ?startDate }
-      OPTIONAL { ?person wdt:P21 ?gender. }
-      OPTIONAL { ?person wdt:P569 ?birthDate. }
-      OPTIONAL { ?person wdt:P106 ?occupationEntity.
-                 ?occupationEntity rdfs:label ?occupation.
-                 FILTER(LANG(?occupation) = "en") }
-      OPTIONAL { ?person wdt:P140 ?religionEntity.
-                 ?religionEntity rdfs:label ?religion.
-                 FILTER(LANG(?religion) = "en") }
-    }
-    GROUP BY ?country ?person ?position ?startDate ?gender ?birthDate
-  }
+FILTER NOT EXISTS { ?stmt pq:P582 ?endDate }
+?person wdt:P39 ?position.
+OPTIONAL { ?stmt pq:P580 ?startDate }
+OPTIONAL { ?person wdt:P21 ?gender. }
+OPTIONAL { ?person wdt:P569 ?birthDate. }
+OPTIONAL { ?person wdt:P106 ?occupationEntity.
+           OPTIONAL { ?occupationEntity rdfs:label ?occupation.
+                      FILTER(LANG(?occupation) = "en") } }
+OPTIONAL { ?person wdt:P140 ?religionEntity.
+           OPTIONAL { ?religionEntity rdfs:label ?religion.
+                      FILTER(LANG(?religion) = "en") } }
+}
+GROUP BY ?country ?person ?position ?startDate ?gender ?birthDate  }
 
   BIND(
     YEAR(NOW()) - YEAR(?birthDate) -
@@ -53,7 +52,6 @@ WHERE {
   SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
 }
 ORDER BY ?countryLabel
-LIMIT 500
 `;
 
 const ENDPOINT = 'https://query.wikidata.org/sparql';
