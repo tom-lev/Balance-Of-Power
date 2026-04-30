@@ -71,6 +71,15 @@ WHERE {
       }
       ?position wdt:P1001 ?country.
       ?country wdt:P31 wd:Q6256.
+      # Only cover countries not already handled by approach A (P35/P6)
+      FILTER NOT EXISTS {
+        ?country p:P35 ?existingStmt.
+        FILTER NOT EXISTS { ?existingStmt pq:P582 ?ed }
+      }
+      FILTER NOT EXISTS {
+        ?country p:P6 ?existingStmt2.
+        FILTER NOT EXISTS { ?existingStmt2 pq:P582 ?ed2 }
+      }
       OPTIONAL { ?person wdt:P21 ?gender. }
       OPTIONAL { ?person wdt:P569 ?birthDate. }
       OPTIONAL { ?person wdt:P106 ?occupationEntity.
