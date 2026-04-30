@@ -16,21 +16,24 @@ WHERE {
       {
         ?country p:P35 ?stmt.
         ?stmt ps:P35 ?person.
+        ?stmt ps:P35 ?posEntity.
+        BIND(?posEntity AS ?position)
       } UNION {
         ?country p:P6 ?stmt.
         ?stmt ps:P6 ?person.
+        ?stmt ps:P6 ?posEntity.
+        BIND(?posEntity AS ?position)
       }
       FILTER NOT EXISTS { ?stmt pq:P582 ?endDate }
-      ?person wdt:P39 ?position.
       OPTIONAL { ?stmt pq:P580 ?startDate }
       OPTIONAL { ?person wdt:P21 ?gender. }
       OPTIONAL { ?person wdt:P569 ?birthDate. }
       OPTIONAL { ?person wdt:P106 ?occupationEntity.
-                 ?occupationEntity rdfs:label ?occupation.
-                 FILTER(LANG(?occupation) = "en") }
+                 OPTIONAL { ?occupationEntity rdfs:label ?occupation.
+                            FILTER(LANG(?occupation) = "en") } }
       OPTIONAL { ?person wdt:P140 ?religionEntity.
-                 ?religionEntity rdfs:label ?religion.
-                 FILTER(LANG(?religion) = "en") }
+                 OPTIONAL { ?religionEntity rdfs:label ?religion.
+                            FILTER(LANG(?religion) = "en") } }
     }
     GROUP BY ?country ?person ?position ?startDate ?gender ?birthDate
   }
@@ -130,22 +133,18 @@ function parseRows(json) {
   const rows = [];
 
   for (const row of json.results.bindings) {
-    if (row.personLabel?.value?.includes('Neves')) {
-      console.log('Neves position:', row.positionLabel?.value);
-    }
     const country    = row.countryLabel?.value    || '';
     const person     = row.personLabel?.value     || '';
     const position   = row.positionLabel?.value   || '';
-    const occupation = row.occupations?.value || '—';
-    const religion   = row.religions?.value  || '—';
+    const occupation = row.occupations?.value     || '—';
+    const religion   = row.religions?.value       || '—';
     const gender     = row.genderLabel?.value     || '—';
     const birthDate  = row.birthDate?.value       || '';
     const startDate  = row.startDate?.value       || '';
-    const age        = row.age?.value             ? parseInt(row.age.value) : null;
+    const age        = row.age?.value             ? parseInt(row.age.value)           : null;
     const yio        = row.yearsInOffice?.value   ? parseInt(row.yearsInOffice.value) : null;
     const role       = classifyRole(position);
 
-    // Deduplicate by country+person+role (multiple occupations/religions may cause dupes)
     const key = `${country}|${person}|${role}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -208,10 +207,10 @@ function renderStats() {
   for (const d of filtered) counts[d.role] = (counts[d.role] || 0) + 1;
 
   const items = [
-    { label: 'Total',            value: counts.total,                    cls: 'accent' },
-    { label: 'Prime Ministers',  value: counts['Prime Minister'] || 0 },
-    { label: 'Presidents',       value: counts['President']      || 0 },
-    { label: 'Monarchs',         value: counts['Monarch']        || 0 },
+    { label: 'Total',           value: counts.total,                   cls: 'accent' },
+    { label: 'Prime Ministers', value: counts['Prime Minister'] || 0 },
+    { label: 'Presidents',      value: counts['President']      || 0 },
+    { label: 'Monarchs',        value: counts['Monarch']        || 0 },
   ];
 
   el.innerHTML = items.map(i =>
@@ -250,7 +249,6 @@ function renderTable() {
 
   table.style.display = 'table';
 
-  // Update sort indicators
   document.querySelectorAll('thead th').forEach(th => {
     th.classList.remove('sorted', 'asc');
     if (th.dataset.col === sortCol) {
