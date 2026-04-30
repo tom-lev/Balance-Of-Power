@@ -144,6 +144,8 @@ function calcAge(birthDate) {
   if (!birthDate) return null;
   const m = birthDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (!m) return null;
+  // YYYY-01-01 means Wikidata only knows the birth year — age can't be reliably computed
+  if (m[2] === '01' && m[3] === '01') return null;
   const now = new Date();
   let age = now.getFullYear() - parseInt(m[1]);
   const monthDiff = now.getMonth() + 1 - parseInt(m[2]);
@@ -263,7 +265,18 @@ function mergeResults(rowsA, rowsB) {
   for (const row of rowsA) upsert(row, 'A');
   for (const row of rowsB) upsert(row, 'B');
 
-  return Array.from(map.values());
+  const merged = Array.from(map.values());
+
+  // In presidential systems the president is both head of state and head of government.
+  // When the same person fills both roles in the same country, drop the PM entry.
+  const stateLeaders = new Set(
+    merged
+      .filter(r => r.stmtRole === 'head_of_state')
+      .map(r => `${r.country}|${r.person}`)
+  );
+  return merged.filter(r =>
+    !(r.stmtRole === 'head_of_government' && stateLeaders.has(`${r.country}|${r.person}`))
+  );
 }
 
 // ─── Filter & Sort ───────────────────────────────────────────────────────────
