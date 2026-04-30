@@ -2,14 +2,12 @@
 
 const SPARQL_A = `
 SELECT
-  ?countryLabel ?personLabel ?stmtRole ?positionLabel ?startDate
-  ?genderLabel ?birthDate ?occupations ?religions
+  ?country ?countryLabel ?person ?personLabel ?stmtRole ?positionLabel ?startDate
+  ?genderLabel ?birthDate
 WHERE {
   {
     SELECT
       ?country ?person ?stmtRole ?position ?startDate ?gender ?birthDate
-      (GROUP_CONCAT(DISTINCT ?occupation; separator=", ") AS ?occupationList)
-      (GROUP_CONCAT(DISTINCT ?religion;  separator=", ") AS ?religionList)
     WHERE {
       ?country wdt:P31 wd:Q6256.
       {
@@ -45,17 +43,9 @@ WHERE {
       OPTIONAL { ?stmt pq:P580 ?startDate }
       OPTIONAL { ?person wdt:P21 ?gender. }
       OPTIONAL { ?person wdt:P569 ?birthDate. }
-      OPTIONAL { ?person wdt:P106 ?occupationEntity.
-                 OPTIONAL { ?occupationEntity rdfs:label ?occupation.
-                            FILTER(LANG(?occupation) = "en") } }
-      OPTIONAL { ?person wdt:P140 ?religionEntity.
-                 OPTIONAL { ?religionEntity rdfs:label ?religion.
-                            FILTER(LANG(?religion) = "en") } }
     }
     GROUP BY ?country ?person ?stmtRole ?position ?startDate ?gender ?birthDate
   }
-  BIND(IF(?occupationList != "", ?occupationList, "") AS ?occupations)
-  BIND(IF(?religionList   != "", ?religionList,   "") AS ?religions)
   SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
 }
 ORDER BY ?countryLabel
@@ -63,14 +53,12 @@ ORDER BY ?countryLabel
 
 const SPARQL_B = `
 SELECT
-  ?countryLabel ?personLabel ?stmtRole ?positionLabel ?startDate
-  ?genderLabel ?birthDate ?occupations ?religions
+  ?country ?countryLabel ?person ?personLabel ?stmtRole ?positionLabel ?startDate
+  ?genderLabel ?birthDate
 WHERE {
   {
     SELECT
       ?country ?person ?stmtRole ?position ?startDate ?gender ?birthDate
-      (GROUP_CONCAT(DISTINCT ?occupation; separator=", ") AS ?occupationList)
-      (GROUP_CONCAT(DISTINCT ?religion;  separator=", ") AS ?religionList)
     WHERE {
       ?person p:P39 ?posStmt.
       ?posStmt ps:P39 ?position.
@@ -91,7 +79,6 @@ WHERE {
       }
       ?position wdt:P1001 ?country.
       ?country wdt:P31 wd:Q6256.
-      # Only cover countries not already handled by approach A (P35/P6)
       FILTER NOT EXISTS {
         ?country p:P35 ?existingStmt.
         FILTER NOT EXISTS { ?existingStmt pq:P582 ?ed }
@@ -102,17 +89,9 @@ WHERE {
       }
       OPTIONAL { ?person wdt:P21 ?gender. }
       OPTIONAL { ?person wdt:P569 ?birthDate. }
-      OPTIONAL { ?person wdt:P106 ?occupationEntity.
-                 OPTIONAL { ?occupationEntity rdfs:label ?occupation.
-                            FILTER(LANG(?occupation) = "en") } }
-      OPTIONAL { ?person wdt:P140 ?religionEntity.
-                 OPTIONAL { ?religionEntity rdfs:label ?religion.
-                            FILTER(LANG(?religion) = "en") } }
     }
     GROUP BY ?country ?person ?stmtRole ?position ?startDate ?gender ?birthDate
   }
-  BIND(IF(?occupationList != "", ?occupationList, "") AS ?occupations)
-  BIND(IF(?religionList   != "", ?religionList,   "") AS ?religions)
   SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
 }
 ORDER BY ?countryLabel
@@ -231,7 +210,7 @@ async function fetchSPARQL(query, retries = 3) {
     try {
       const res = await fetch(url);
       if (res.ok) return res.json();
-      if ([429, 502, 503].includes(res.status) && attempt < retries) {
+      if ([429, 502, 503, 504].includes(res.status) && attempt < retries) {
         lastErr = new Error(`HTTP ${res.status}`);
         continue;
       }
@@ -244,6 +223,41 @@ async function fetchSPARQL(query, retries = 3) {
   throw lastErr;
 }
 
+// ─── Enrich ──────────────────────────────────────────────────────────────────
+
+async function enrichRows(rows) {
+  const qids = [...new Set(rows.map(r => r.personQid).filter(q => q.startsWith('Q')))];
+  if (!qids.length) return;
+
+  const values = qids.map(q => `wd:${q}`).join(' ');
+  const query = `
+SELECT ?person
+  (GROUP_CONCAT(DISTINCT ?occupation; separator=", ") AS ?occupations)
+  (GROUP_CONCAT(DISTINCT ?religion;  separator=", ") AS ?religions)
+WHERE {
+  VALUES ?person { ${values} }
+  OPTIONAL { ?person wdt:P106 ?occEnt.
+             OPTIONAL { ?occEnt rdfs:label ?occupation. FILTER(LANG(?occupation) = "en") } }
+  OPTIONAL { ?person wdt:P140 ?relEnt.
+             OPTIONAL { ?relEnt rdfs:label ?religion.  FILTER(LANG(?religion)  = "en") } }
+}
+GROUP BY ?person
+`;
+  const json = await fetchSPARQL(query);
+  const enrichMap = new Map();
+  for (const row of json.results.bindings) {
+    const qid = row.person.value.split('/').pop();
+    enrichMap.set(qid, {
+      occupation: sanitizeOccupation(row.occupations?.value || ''),
+      religion:   row.religions?.value || '—',
+    });
+  }
+  for (const row of rows) {
+    const e = enrichMap.get(row.personQid);
+    if (e) { row.occupation = e.occupation; row.religion = e.religion; }
+  }
+}
+
 // ─── Parse ───────────────────────────────────────────────────────────────────
 
 function parseRows(json) {
@@ -251,20 +265,20 @@ function parseRows(json) {
   for (const row of json.results.bindings) {
     const country       = row.countryLabel?.value   || '';
     const person        = row.personLabel?.value    || '';
+    const personUri     = row.person?.value         || '';
     const stmtRole      = row.stmtRole?.value       || '';
     const positionLabel = row.positionLabel?.value  || '';
     const gender        = row.genderLabel?.value    || '—';
     const birthDate     = row.birthDate?.value      || '';
     const startDate     = row.startDate?.value      || '';
-    const occupation    = sanitizeOccupation(row.occupations?.value || '');
-    const religion      = row.religions?.value      || '—';
     const role          = classifyRole(stmtRole, positionLabel);
     const age           = calcAge(birthDate);
     const yio           = calcYIO(startDate);
+    const personQid     = personUri.split('/').pop();
 
     if (!country || !person) continue;
 
-    rows.push({ country, person, stmtRole, positionLabel, role, gender, age, yio, startDate, birthDate, occupation, religion });
+    rows.push({ country, person, personQid, stmtRole, positionLabel, role, gender, age, yio, startDate, birthDate, occupation: '—', religion: '—' });
   }
   return rows;
 }
@@ -474,6 +488,9 @@ document.getElementById('genderFilter').addEventListener('change', applyFilter);
 
     setLoadMsg('Merging results...');
     allData = mergeResults(rowsA, rowsB);
+
+    setLoadMsg('Loading occupations and religions...');
+    await enrichRows(allData);
 
     document.getElementById('loadMsg').style.display = 'none';
     applyFilter();
