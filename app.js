@@ -15,11 +15,15 @@ WHERE {
       {
         ?country p:P35 ?stmt.
         ?stmt ps:P35 ?person.
+        ?stmt wikibase:rank ?rank.
+        FILTER(?rank != wikibase:DeprecatedRank)
         ?country wdt:P35 ?position.
         BIND("head_of_state" AS ?stmtRole)
       } UNION {
         ?country p:P6 ?stmt.
         ?stmt ps:P6 ?person.
+        ?stmt wikibase:rank ?rank.
+        FILTER(?rank != wikibase:DeprecatedRank)
         ?country wdt:P6 ?position.
         BIND("head_of_government" AS ?stmtRole)
       }
@@ -56,6 +60,8 @@ WHERE {
     WHERE {
       ?person p:P39 ?posStmt.
       ?posStmt ps:P39 ?position.
+      ?posStmt wikibase:rank ?rank.
+      FILTER(?rank != wikibase:DeprecatedRank)
       FILTER NOT EXISTS { ?posStmt pq:P582 ?endDate }
       OPTIONAL { ?posStmt pq:P580 ?startDate }
       {
