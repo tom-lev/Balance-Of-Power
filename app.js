@@ -2,13 +2,13 @@
 
 const SPARQL = `
 SELECT
-  ?countryLabel ?personLabel ?positionLabel ?startDate
+  ?countryLabel ?personLabel ?stmtRole ?startDate
   ?genderLabel ?birthDate ?age ?yearsInOffice
-  ?occupations ?religions
+  ?occupations ?religions ?isMonarch
 WHERE {
   {
     SELECT
-      ?country ?person ?position ?startDate ?gender ?birthDate
+      ?country ?person ?stmtRole ?startDate ?gender ?birthDate ?isMonarch
       (GROUP_CONCAT(DISTINCT ?occupation; separator=", ") AS ?occupationList)
       (GROUP_CONCAT(DISTINCT ?religion;  separator=", ") AS ?religionList)
     WHERE {
@@ -16,18 +16,21 @@ WHERE {
       {
         ?country p:P35 ?stmt.
         ?stmt ps:P35 ?person.
-        ?stmt ps:P35 ?posEntity.
-        BIND(?posEntity AS ?position)
+        BIND("head_of_state" AS ?stmtRole)
       } UNION {
         ?country p:P6 ?stmt.
         ?stmt ps:P6 ?person.
-        ?stmt ps:P6 ?posEntity.
-        BIND(?posEntity AS ?position)
+        BIND("head_of_government" AS ?stmtRole)
       }
       FILTER NOT EXISTS { ?stmt pq:P582 ?endDate }
       OPTIONAL { ?stmt pq:P580 ?startDate }
       OPTIONAL { ?person wdt:P21 ?gender. }
       OPTIONAL { ?person wdt:P569 ?birthDate. }
+      OPTIONAL {
+        ?person wdt:P39 ?posEnt.
+        ?posEnt wdt:P279* wd:Q116.
+        BIND("true" AS ?isMonarch)
+      }
       OPTIONAL { ?person wdt:P106 ?occupationEntity.
                  OPTIONAL { ?occupationEntity rdfs:label ?occupation.
                             FILTER(LANG(?occupation) = "en") } }
@@ -35,7 +38,7 @@ WHERE {
                  OPTIONAL { ?religionEntity rdfs:label ?religion.
                             FILTER(LANG(?religion) = "en") } }
     }
-    GROUP BY ?country ?person ?position ?startDate ?gender ?birthDate
+    GROUP BY ?country ?person ?stmtRole ?startDate ?gender ?birthDate ?isMonarch
   }
 
   BIND(
@@ -50,8 +53,8 @@ WHERE {
       (MONTH(NOW()) = MONTH(?startDate) && DAY(NOW()) < DAY(?startDate)), 1, 0)
     AS ?yearsInOffice
   )
-  BIND(IF(?occupationList != "", ?occupationList, "—") AS ?occupations)
-  BIND(IF(?religionList   != "", ?religionList,   "—") AS ?religions)
+  BIND(IF(?occupationList != "", ?occupationList, "") AS ?occupations)
+  BIND(IF(?religionList   != "", ?religionList,   "") AS ?religions)
 
   SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
 }
@@ -61,17 +64,14 @@ ORDER BY ?countryLabel
 const ENDPOINT = 'https://query.wikidata.org/sparql';
 
 // ─── Role Classification ─────────────────────────────────────────────────────
+// Based on stmt property (P35/P6) + monarch check — NOT on label strings
 
-function classifyRole(lbl) {
-  if (!lbl) return 'Other';
-  const l = lbl.toLowerCase();
-  if (l.includes('prime minister') || l.includes('chancellor') || l.includes('premier') || l.includes('head of government')) return 'Prime Minister';
-  if (l.includes('president')) return 'President';
-  if (
-    l.includes('king') || l.includes('queen') || l.includes('emir') ||
-    l.includes('sultan') || l.includes('monarch') || l.includes('prince') ||
-    l.includes('emperor') || l.includes('sheikh') || l.includes('grand duke')
-  ) return 'Monarch';
+function classifyRole(stmtRole, isMonarch) {
+  if (stmtRole === 'head_of_government') return 'Prime Minister';
+  if (stmtRole === 'head_of_state') {
+    if (isMonarch === 'true') return 'Monarch';
+    return 'President';
+  }
   return 'Other';
 }
 
@@ -80,8 +80,29 @@ function classifyRole(lbl) {
 function formatDate(d) {
   if (!d) return '—';
   const m = d.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (!m) return d.slice(0, 10) || '—';
+  if (!m) return '—';
+  // If Jan 1 — likely year-precision only, show year only
+  if (m[2] === '01' && m[3] === '01') return m[1];
   return `${m[3]}.${m[2]}.${m[1]}`;
+}
+
+function sanitizeAge(age) {
+  if (age == null || isNaN(age)) return null;
+  if (age < 20 || age > 120) return null;
+  return age;
+}
+
+function sanitizeYIO(yio) {
+  if (yio == null || isNaN(yio)) return null;
+  if (yio < 0 || yio > 80) return null;
+  return yio;
+}
+
+function sanitizeOccupation(occ) {
+  if (!occ) return '—';
+  // Remove trivial-only entries
+  const parts = occ.split(', ').filter(p => p.trim().toLowerCase() !== 'politician');
+  return parts.length > 0 ? parts.join(', ') : 'politician';
 }
 
 function roleBadge(role) {
@@ -98,13 +119,13 @@ function genderCell(g) {
   if (!g || g === '—') return '<span class="gender-dot"><span class="dot dot-o"></span>—</span>';
   const isF = g.toLowerCase().includes('female');
   const isM = g.toLowerCase().includes('male');
-  const cls = isF ? 'dot-f' : isM ? 'dot-m' : 'dot-o';
+  const cls   = isF ? 'dot-f' : isM ? 'dot-m' : 'dot-o';
   const label = isF ? 'Female' : isM ? 'Male' : g;
   return `<span class="gender-dot"><span class="dot ${cls}"></span>${label}</span>`;
 }
 
 function ageClass(age) {
-  if (!age || isNaN(age)) return '';
+  if (age == null) return '';
   if (age < 50) return 'age-young';
   if (age < 70) return 'age-mid';
   return 'age-old';
@@ -114,9 +135,9 @@ function ageClass(age) {
 
 let allData = [];
 let filtered = [];
-let sortCol = 'country';
-let sortAsc = true;
-let page = 0;
+let sortCol  = 'country';
+let sortAsc  = true;
+let page     = 0;
 const PER_PAGE = 30;
 
 // ─── Fetch & Parse ───────────────────────────────────────────────────────────
@@ -129,27 +150,40 @@ async function fetchData() {
 }
 
 function parseRows(json) {
+  // Dedup key: country|person|stmtRole — allows same person in two roles (e.g. US president)
+  // but blocks duplicate rows for same role
   const seen = new Set();
   const rows = [];
 
   for (const row of json.results.bindings) {
-    const country    = row.countryLabel?.value    || '';
-    const person     = row.personLabel?.value     || '';
-    const position   = row.positionLabel?.value   || '';
-    const occupation = row.occupations?.value     || '—';
-    const religion   = row.religions?.value       || '—';
-    const gender     = row.genderLabel?.value     || '—';
-    const birthDate  = row.birthDate?.value       || '';
-    const startDate  = row.startDate?.value       || '';
-    const age        = row.age?.value             ? parseInt(row.age.value)           : null;
-    const yio        = row.yearsInOffice?.value   ? parseInt(row.yearsInOffice.value) : null;
-    const role       = classifyRole(position);
+    const country   = row.countryLabel?.value || '';
+    const person    = row.personLabel?.value  || '';
+    const stmtRole  = row.stmtRole?.value     || '';
+    const isMonarch = row.isMonarch?.value    || '';
+    const gender    = row.genderLabel?.value  || '—';
+    const birthDate = row.birthDate?.value    || '';
+    const startDate = row.startDate?.value    || '';
 
-    const key = `${country}|${person}|${role}`;
+    const rawAge = row.age?.value          ? parseInt(row.age.value)           : null;
+    const rawYio = row.yearsInOffice?.value ? parseInt(row.yearsInOffice.value) : null;
+    const age    = sanitizeAge(rawAge);
+    const yio    = sanitizeYIO(rawYio);
+
+    const rawOcc    = row.occupations?.value || '';
+    const rawRel    = row.religions?.value   || '';
+    const occupation = sanitizeOccupation(rawOcc);
+    const religion   = rawRel || '—';
+
+    const role = classifyRole(stmtRole, isMonarch);
+
+    // Skip clearly bad rows
+    if (!country || !person) continue;
+
+    const key = `${country}|${person}|${stmtRole}`;
     if (seen.has(key)) continue;
     seen.add(key);
 
-    rows.push({ country, person, position, role, gender, age, yio, startDate, birthDate, occupation, religion });
+    rows.push({ country, person, stmtRole, role, gender, age, yio, startDate, birthDate, occupation, religion });
   }
 
   return rows;
@@ -182,19 +216,19 @@ function applySort() {
   filtered.sort((a, b) => {
     let av, bv;
     switch (sortCol) {
-      case 'country':       av = a.country;    bv = b.country;    break;
-      case 'person':        av = a.person;     bv = b.person;     break;
-      case 'role':          av = a.role;       bv = b.role;       break;
-      case 'gender':        av = a.gender;     bv = b.gender;     break;
-      case 'age':           av = a.age ?? 999; bv = b.age ?? 999; break;
-      case 'yearsInOffice': av = a.yio ?? -1;  bv = b.yio ?? -1;  break;
-      case 'startDate':     av = a.startDate;  bv = b.startDate;  break;
-      case 'occupation':    av = a.occupation; bv = b.occupation; break;
-      case 'religion':      av = a.religion;   bv = b.religion;   break;
-      default:              av = a.country;    bv = b.country;
+      case 'country':       av = a.country;     bv = b.country;     break;
+      case 'person':        av = a.person;      bv = b.person;      break;
+      case 'role':          av = a.role;        bv = b.role;        break;
+      case 'gender':        av = a.gender;      bv = b.gender;      break;
+      case 'age':           av = a.age  ?? 999; bv = b.age  ?? 999; break;
+      case 'yearsInOffice': av = a.yio  ?? -1;  bv = b.yio  ?? -1;  break;
+      case 'startDate':     av = a.startDate;   bv = b.startDate;   break;
+      case 'occupation':    av = a.occupation;  bv = b.occupation;  break;
+      case 'religion':      av = a.religion;    bv = b.religion;    break;
+      default:              av = a.country;     bv = b.country;
     }
     if (av < bv) return sortAsc ? -1 : 1;
-    if (av > bv) return sortAsc ? 1 : -1;
+    if (av > bv) return sortAsc ?  1 : -1;
     return 0;
   });
 }
