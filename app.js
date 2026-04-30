@@ -1,5 +1,6 @@
 // ─── SPARQL Query ───────────────────────────────────────────────────────────
 
+const SPARQL = `
 SELECT
   ?countryLabel ?personLabel ?positionLabel ?startDate
   ?genderLabel ?birthDate ?age ?yearsInOffice
@@ -52,6 +53,7 @@ WHERE {
   SERVICE wikibase:label { bd:serviceParam wikibase:language "he,en". }
 }
 ORDER BY ?countryLabel
+`;
 
 const ENDPOINT = 'https://query.wikidata.org/sparql';
 
